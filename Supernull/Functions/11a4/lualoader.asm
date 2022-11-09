@@ -1,5 +1,3 @@
-%define VERSION_NUMBER 3
-
 ;;;; lualoader.asm: function which is called during DisplayToClipboard, and conditionally launches some Lua function from the calling character's folder.
 ;;;;                it's pretty messy so it deserves some revision later.
 ;; at entry, EAX=the input string, EBP=the character data pointer
@@ -9,8 +7,7 @@
   dd .AddressData
   dd .StringData
 ;; VERSION NUMBER, ONLY INCREASE if making change to official respository.
-;; For personal changes, please implement them at runtime via LuaFile without modifying this number.
-  dd VERSION_NUMBER
+;; For personal changes, please implement them at runtime via LuaFile without modifying this number.  
 
 push eax
 ;; inspect the input string to check if it starts with `!lua `

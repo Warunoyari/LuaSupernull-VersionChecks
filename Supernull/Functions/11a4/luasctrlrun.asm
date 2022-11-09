@@ -1,5 +1,3 @@
-%define VERSION_NUMBER 3
-
 ;; EAX=sctrl ID, EDI=sctrl content
 ;; 1.1a4: entry point = 0x0044BBAD
 [bits 32]
@@ -7,9 +5,6 @@
 ;; Area References
   dd .AddressData
   dd .StringData
-;; VERSION NUMBER, ONLY INCREASE if making change to official respository.
-;; For personal changes, please implement them at runtime via LuaFile without modifying this number.
-  dd VERSION_NUMBER
 
 ;; preserve the sctrl ID
 push eax

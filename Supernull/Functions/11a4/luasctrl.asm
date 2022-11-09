@@ -1,5 +1,3 @@
-%define VERSION_NUMBER 3
-
 ;; ECX=sctrl string
 ;; 1.1a4: entry point = 0x004480A5
 ;; 1.1a4: stricmp = [0x004DE1FC]
@@ -8,9 +6,6 @@
 ;; Area References
   dd .AddressData
   dd .StringData
-;; VERSION NUMBER, ONLY INCREASE if making change to official respository.
-;; For personal changes, please implement them at runtime via LuaFile without modifying this number.
-  dd VERSION_NUMBER
 
 ;; compare the input to the LuaExec state controller string
 lea ecx,dword [esp+0x20]
