@@ -75,15 +75,16 @@ luaLoadingFunctionAddress = -1;
     
     mugen.log(string.format("Lua loading function is loaded into memory at 0x%08x.\n\n", tonumber(luaLoadingFunctionAddress)))
 
-    -- write the call to our loaded lua-executing payload    
+    -- write the call to our loaded lua-executing payload
+    -- +8 to skip over pointers
     if (mll.GetMugenVersion() == 1)
       then
-        JumpDistance = luaLoadingFunctionAddress + 12 - 0x0044B7AA - 5
+        JumpDistance = luaLoadingFunctionAddress + 8 - 0x0044B7AA - 5
         mll.WriteByte(0x0044B7AA, 0xE8)
         mll.WriteInteger(0x0044B7AB, JumpDistance)
         mll.WriteByte(0x0044B7AF, 0x90)            
     else
-        JumpDistance = luaLoadingFunctionAddress + 12 - 0x0044BCDA - 5
+        JumpDistance = luaLoadingFunctionAddress + 8 - 0x0044BCDA - 5
         mll.WriteByte(0x0044BCDA, 0xE8)
         mll.WriteInteger(0x0044BCDB, JumpDistance)
         mll.WriteByte(0x0044BCDF, 0x90)        
@@ -133,24 +134,25 @@ luaLoadingFunctionAddress = -1;
 
     
     luaLoadString = 0
-    -- write the call to our loaded lua-executing payload    
+    -- write the call to our loaded lua-executing payload
+    -- +8 Pointer Distance
     if mll.GetMugenVersion() == 1 
       then
-        JumpDistance = luaLoadingStateControllerAddress + 12 - 0x004480A5 - 5
+        JumpDistance = luaLoadingStateControllerAddress + 8 - 0x004480A5 - 5
         mll.WriteByte(0x004480A5, 0xE9)
         mll.WriteInteger(0x004480A6, JumpDistance)
         mll.WriteByte(0x004480AA, 0x90)
         
-        jumpDistance = luaRunningStateControllerAddress + 12 - 0x0044BBAD - 5
+        jumpDistance = luaRunningStateControllerAddress + 8 - 0x0044BBAD - 5
         mll.WriteByte(0x0044BBAD, 0xE9)
         mll.WriteInteger(0x0044BBAE, jumpDistance)
       else
-        JumpDistance = luaLoadingStateControllerAddress + 12 - 0x004485D5 - 5
+        JumpDistance = luaLoadingStateControllerAddress + 8 - 0x004485D5 - 5
         mll.WriteByte(0x004485D5, 0xE9)
         mll.WriteInteger(0x004485D6, JumpDistance)
         mll.WriteByte(0x004485DA, 0x90)
 
-        JumpDistance = luaRunningStateControllerAddress + 12 - 0x0044C0DD - 5
+        JumpDistance = luaRunningStateControllerAddress + 8 - 0x0044C0DD - 5
         mll.WriteByte(0x0044C0DD, 0xE9)
         mll.WriteInteger(0x0044C0DE, JumpDistance)
 
@@ -166,8 +168,8 @@ luaLoadingFunctionAddress = -1;
         if luaLoadString == 0x00 then os.exit(-1) end
         mugen.log(string.format("luaL_loadstring function at address 0x%08x.\n", tonumber(luaLoadString)))
 
-        
-        JumpDistance = luaRunningStateControllerAddress + 12 - 0x0044BBAD - 5
+        -- +8 Label Data
+        JumpDistance = luaRunningStateControllerAddress + 8 - 0x0044BBAD - 5
         mll.WriteByte(0x0044BBAD, 0xE9)
         mll.WriteInteger(0x0044BBAE, JumpDistance)
     end            
