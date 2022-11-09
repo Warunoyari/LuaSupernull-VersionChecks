@@ -1,9 +1,18 @@
+%define VERSION_NUMBER 3
+
 ;; EAX=sctrl ID, EDI=sctrl content
 ;; 1.1a4: entry point = 0x0044BBAD
 [bits 32]
+
+;; Area References
+  dd .AddressData
+  dd .StringData
+;; VERSION NUMBER, ONLY INCREASE if making change to official respository.
+;; For personal changes, please implement them at runtime via LuaFile without modifying this number.
+  dd VERSION_NUMBER
+
 ;; preserve the sctrl ID
 push eax
-
 ;; put our character's ID into a Lua global variable
 mov ecx,dword [ebp+4]
 push ecx
@@ -12,7 +21,8 @@ push ecx
 mov ecx,0x004C4FD0 ;; lua_pushinteger(L, ID)
 call ecx 
 add esp,0x08
-push charid
+.CharID_RewriteString:
+  push charid
 push -10002
 mov ecx, dword [0x005040FC]
 push ecx
@@ -42,7 +52,8 @@ lea eax,dword [eax + 0x38]
 push eax
 mov ecx,dword [0x005040FC]
 push ecx
-mov ecx, 0x004C64A0 ;; luaL_loadstring
+.LuaLoadString_WriteLoc:
+  mov ecx, 0x004C64A0 ;; luaL_loadstring -- label for consistency in files
 call ecx
 add esp,0x08
 test eax,eax
@@ -75,6 +86,8 @@ cmp ecx, -1
 je .not_custom_stated
 ;; read the info pointer of the state owner
 mov edx, dword [0x5040E8]
+;; Custom State Fix
+mov ecx, dword [ebp + 0x08]
 lea edx, dword [edx + 0x12274 + ecx * 0x04]
 mov edx, dword [edx]
 mov ecx, dword [edx]
@@ -154,7 +167,8 @@ push eax
 mov eax,dword [edi + 0x60]
 lea eax,[eax + 0x38]
 push eax
-push errmsg
+.ErrorExecute_RewriteString:
+  push errmsg
 mov ecx, 0x0040C710 ;; mugen error handler (clipboard print)
 call ecx
 add esp,0x0C
@@ -163,5 +177,24 @@ add esp,0x0C
 mov eax,0x0044B7DA
 jmp eax
 
+;; Areas for Writing
+.AddressData: 
+  dd .CharID_RewriteString
+  dd .ErrorExecute_RewriteString
+  dd .LuaLoadString_WriteLoc
+
+;; Strings for Loading
+.StringData:
+  dd .CurrCharacterIDString
+  dd .ErrorExecuteString
+  dd .LuaLoadString
+
+.CurrCharacterIDString:
+  db "CurrCharacterID", 0x00
+.ErrorExecuteString:
+  db "Error while executing Lua from %s: %s.", 0x0D, 0x0A, 0x00
+.LuaLoadString:
+  db "DONOTREMOVE"
+
+charid db "CurrCharacterID", 0x00  
 errmsg db "Error while executing Lua from %s: %s.", 0x0D, 0x0A, 0x00
-charid db "CurrCharacterID", 0x00

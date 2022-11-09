@@ -1,10 +1,18 @@
+%define VERSION_NUMBER 3
+
 ;;;; lualoader.asm: function which is called during DisplayToClipboard, and conditionally launches some Lua function from the calling character's folder.
 ;;;;                it's pretty messy so it deserves some revision later.
 ;; at entry, EAX=the input string, EBP=the character data pointer
 [bits 32]
 
-push eax
+;; Area References
+  dd .AddressData
+  dd .StringData
+;; VERSION NUMBER, ONLY INCREASE if making change to official respository.
+;; For personal changes, please implement them at runtime via LuaFile without modifying this number.
+  dd VERSION_NUMBER
 
+push eax
 ;; inspect the input string to check if it starts with `!lua `
 cmp byte [eax+0],0x21
 jne .nolua
@@ -86,7 +94,8 @@ push ecx
 mov ecx,0x004C4FD0 ;; lua_pushinteger(L, ID)
 call ecx 
 add esp,0x08
-push charid
+.CharID_RewriteString:
+  push charid
 push -10002
 mov ecx, dword [0x005040FC]
 push ecx
@@ -110,7 +119,8 @@ jnz .error
 jmp .done
 
 .error:
-push errmsg
+.ErrorExecute_RewriteString:
+  push errmsg
 mov ecx, 0x0040C710 ;; mugen error handler (clipboard print)
 call ecx
 add esp,0x04
@@ -127,5 +137,22 @@ push eax
 pop eax
 ret
 
+;; Areas for Writing
+.AddressData: 
+  dd .CharID_RewriteString
+  dd .ErrorExecute_RewriteString
+
+;; Strings for Loading
+.StringData:
+  dd .CurrCharacterIDString
+  dd .ErrorExecuteString
+
+.CurrCharacterIDString:
+  db "CurrCharacterID", 0x00
+.ErrorExecuteString:
+  db "Error while executing Lua from %s: %s.", 0x0D, 0x0A, 0x00
+
+
+;; 
 errmsg db "Error while loading Lua file from command '%s'.", 0x0D, 0x0A, 0x00
 charid db "CurrCharacterID", 0x00

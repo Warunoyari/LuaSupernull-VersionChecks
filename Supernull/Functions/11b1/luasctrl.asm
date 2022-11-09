@@ -2,10 +2,16 @@
 ;; 1.1b1: entry point = 0x004485D5
 ;; 1.1b1: stricmp = [0x004DE1FC]
 [bits 32]
+
+;; Area References
+  dd .AddressData
+  dd .StringData
+
 ;; compare the input to the LuaExec state controller string
 lea ecx,dword [esp+0x20]
 push ecx
-push luaexec
+.LuaExec_RewriteString:
+  push luaexec
 call dword [0x004DE1FC]
 add esp,0x08
 ;; if equal, read value as a string
@@ -15,7 +21,8 @@ je .lua_string
 ;; compare the input to the LuaFile state controller string
 lea ecx,dword [esp+0x20]
 push ecx
-push luafile
+.LuaFile_RewriteString:
+  push luafile
 call dword [0x004DE1FC]
 add esp,0x08
 ;; if equal, read value as file
@@ -37,7 +44,8 @@ jmp .lua_readparam
 push 0x162
 
 .lua_readparam:
-push luastring
+.LuaString_RewriteString:
+  push luastring
 push ebp
 mov eax,0x0046A5E0 ;; this function finds the address for the start of the input string
 call eax
@@ -48,7 +56,8 @@ jnz .lua_parseparam
 pop eax
 lea eax,[esp+0x20]
 push eax
-push luamissing
+.LuaProperty_RewriteString:
+  push luamissing
 mov eax,0x0044861F
 jmp eax
 
@@ -71,6 +80,30 @@ mov dword [ebx + 0x10],eax ;; store the state controller ID in the state control
 mov eax,0x004472C2 ;; return to sctrl processing
 jmp eax
 
+;; Areas for Writing (defined here)
+.AddressData: 
+  dd .LuaExec_RewriteString
+  dd .LuaFile_RewriteString
+  dd .LuaProperty_RewriteString
+  dd .LuaString_RewriteString
+
+;; Strings for Loading
+.StringData:
+  dd .LuaExecString
+  dd .LuaFileString
+  dd .LuaPropertyString
+  dd .LuaString
+
+.LuaExecString:
+  db "LuaExec", 0x00
+.LuaFileString:
+  db "LuaFile", 0x00
+.LuaPropertyString:
+  db "lua property not specified for %s.", 0x0D, 0x0A, 0x00
+.LuaString:
+  db "lua", 0x00
+
+;; 
 luaexec db "LuaExec", 0x00
 luafile db "LuaFile", 0x00
 luamissing db "lua property not specified for %s.", 0x0D, 0x0A, 0x00

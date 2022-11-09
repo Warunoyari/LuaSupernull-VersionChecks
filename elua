@@ -1,215 +1,289 @@
 -- BEGIN CONFIGURATION
 
-	-- name of this file (should NEVER be changed due to ROP dependency) - note you should also never rename or move this file!
-	local EXPLOIT_FILENAME = "elua"
-	-- path to the library for C interface - you can move or rename this, but make sure not to include the `.lua` extension in this constant.
-	local EXPLOIT_LIBRARY = "Supernull/MLL/mll"
+    -- name of this file (should NEVER be changed due to ROP dependency) - note you should also never rename or move this file!
+    local EXPLOIT_FILENAME = "elua"
+    -- path to the library for C interface - you can move or rename this, but make sure not to include the `.lua` extension in this constant.
+    local EXPLOIT_LIBRARY = "Supernull/MLL/mll"
 
-	-- location of the payload DLL files - feel free to modify + rename these, however, it may not load unless you leave the DLL extension intact
-	local EXPLOIT_FFILIB = "Supernull/Libraries/ffi.dll"
-	local EXPLOIT_LUALIB = "Supernull/Libraries/lua5.1.dll"
+    -- location of the payload DLL files - feel free to modify + rename these, however, it may not load unless you leave the DLL extension intact
+    local EXPLOIT_FFILIB = "Supernull/Libraries/ffi.dll"
+    local EXPLOIT_LUALIB = "Supernull/Libraries/lua5.1.dll"
 
-	-- location of a folder containing any functions we will be memory-mapping and using
-	local EXPLOIT_FUNCTION_FOLDER = "Supernull/Functions/"
+    -- location of a folder containing any functions we will be memory-mapping and using
+    local EXPLOIT_FUNCTION_FOLDER = "Supernull/Functions/"
 
 -- END CONFIGURATION
 
+
+
+--- Reusable Global Vars
+JumpDistance = -1;
+
 function bootstrap()
-	mugen.log("\n\nProcessing exploit script in " .. EXPLOIT_FILENAME .. '...\n')
+    mugen.log("\n\nProcessing exploit script in " .. EXPLOIT_FILENAME .. '...\n')
 
-	-- get folder containing this elua file
-	local sourcefile = debug.getinfo(1, "S").source
-	local sourcefolder = string.sub(sourcefile, 2, string.len(sourcefile) - string.len(EXPLOIT_FILENAME))
-	-- 1.1b1 restricts package.path to be `data/?.lua`, but we can just add another load path here
-	package.path = package.path .. ";./?.lua;./?"
+    -- get folder containing this elua file
+    local sourcefile = debug.getinfo(1, "S").source
+    local sourcefolder = string.sub(sourcefile, 2, string.len(sourcefile) - string.len(EXPLOIT_FILENAME))
+    -- 1.1b1 restricts package.path to be `data/?.lua`, but we can just add another load path here
+    package.path = package.path .. ";./?.lua;./?"
 
-	-- attempt to load mll.lua -- we load this into the global table for use later
-	_G.mll = require(sourcefolder .. EXPLOIT_LIBRARY)
-	mll.LoadBaseLibraries(sourcefolder, EXPLOIT_LUALIB, EXPLOIT_FFILIB)
+    -- attempt to load mll.lua -- we load this into the global table for use later
+    _G.mll = require(sourcefolder .. EXPLOIT_LIBRARY)
+    mll.LoadBaseLibraries(sourcefolder, EXPLOIT_LUALIB, EXPLOIT_FFILIB)
 
-	if not mll.VirtualProtect(0x400000, 0x100000, 0x40) then os.exit(-1) end
-	if not mll.VirtualProtect(0x67BD0210, 0x1000, 0x40) then os.exit(-1) end
-	mugen.log("Successfully granted execute permissions in both memory regions.\n\n")
+    if not mll.VirtualProtect(0x400000, 0x100000, 0x40) then os.exit(-1) end
+    if not mll.VirtualProtect(0x67BD0210, 0x1000, 0x40) then os.exit(-1) end
+    mugen.log("Successfully granted execute permissions in both memory regions.\n\n")
 
-	local stubFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "stub.bin", 0x1000, 0x40)
-	if stubFunctionAddress == 0 then os.exit(-1) end
-	mugen.log(string.format("Stub return function is loaded into memory at 0x%08x.\n\n", tonumber(stubFunctionAddress)))
+    local stubFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "stub.bin", 0x2000, 0x40)
+    if stubFunctionAddress == 0 then os.exit(-1) end
+    mugen.log(string.format("Stub return function is loaded into memory at 0x%08x.\n\n", tonumber(stubFunctionAddress)))
 
-	-- overwrite return address from Lua execution
-	local preservedStack = mll.ReadInteger(0x67BD0328)
-	mll.WriteInteger(preservedStack + 0x1B0, stubFunctionAddress)
+    -- overwrite return address from Lua execution
+    local preservedStack = mll.ReadInteger(0x67BD0328)
+    mll.WriteInteger(preservedStack + 0x1B0, stubFunctionAddress)
 
-	-- replacement for placeholder addresses in the loaded stub
-	if mll.GetMugenVersion() == 1 then
-		-- overwrite the stub statedef alloc target
-		jumpDistance = 0x00466000 - (stubFunctionAddress + 0x1B) - 4
-		mll.WriteInteger(stubFunctionAddress + 0x1B, jumpDistance)
-	else
-		-- overwrite the stub statedef alloc target
-		jumpDistance = 0x00466550 - (stubFunctionAddress + 0x1B) - 4
-		mll.WriteInteger(stubFunctionAddress + 0x1B, jumpDistance)
-	end
+-- Version forks start here
 
-	-- fetch the character info structure pointer
-	local characterInfoPointer = mll.ReadInteger(preservedStack + 0x33C)
-	mugen.log(string.format("Character info structure pointer discovered at 0x%08x.\n", tonumber(characterInfoPointer)))
+   -- overwrite the stub statedef alloc target        
+   if mll.GetMugenVersion() == 1 then JumpDistance = 0x00466000 - (stubFunctionAddress + 0x1B) - 4
+   else JumpDistance = 0x00466550 - (stubFunctionAddress + 0x1B) - 4 end
+   mll.WriteInteger(stubFunctionAddress + 0x1B, JumpDistance)
 
-	-- allocate space for the character folder string
-	local characterFolderString = mll.VirtualAlloc(0x1000, 0x40)
-	mll.WriteString(characterFolderString, sourcefolder)
-	mll.WriteInteger(characterInfoPointer + 0xB0, tonumber(characterFolderString))
 
-	-- lua-based additional payload: add a lua-executing function to DisplayToClipboard
-	local luaLoadingFunctionAddress 
-	if mll.GetMugenVersion() == 1 then 
-		luaLoadingFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/lualoader.bin", 0x1000, 0x40)
-	else
-		luaLoadingFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/lualoader.bin", 0x1000, 0x40) 
-	end
-	if luaLoadingFunctionAddress == 0 then os.exit(-1) end
-	mugen.log(string.format("Lua loading function is loaded into memory at 0x%08x.\n\n", tonumber(luaLoadingFunctionAddress)))
+-- Character Info String Pointer
+-- lua-based additional payload: add a lua-executing function to DisplayToClipboard
+luaLoadingFunctionAddress = -1;
 
-	-- write the call to our loaded lua-executing payload
-	if mll.GetMugenVersion() == 1 then
-		jumpDistance = luaLoadingFunctionAddress - 0x0044B7AA - 5
-		mll.WriteByte(0x0044B7AA, 0xE8)
-		mll.WriteInteger(0x0044B7AB, jumpDistance)
-		mll.WriteByte(0x0044B7AF, 0x90)
-		
-		-- adjust for string-printing error message
-		mll.WriteInteger(luaLoadingFunctionAddress + 0xF1, tonumber(luaLoadingFunctionAddress) + 0x10D)
-		
-		-- adjust for charid string
-		mll.WriteInteger(luaLoadingFunctionAddress + 0xB9, tonumber(luaLoadingFunctionAddress) + 0x13F)
-	else
-		jumpDistance = luaLoadingFunctionAddress - 0x0044BCDA - 5
-		mll.WriteByte(0x0044BCDA, 0xE8)
-		mll.WriteInteger(0x0044BCDB, jumpDistance)
-		mll.WriteByte(0x0044BCDF, 0x90)
-		
-		-- adjust for string-printing error message
-		mll.WriteInteger(luaLoadingFunctionAddress + 0xF1, tonumber(luaLoadingFunctionAddress) + 0x10D)
-		
-		-- adjust for charid string
-		mll.WriteInteger(luaLoadingFunctionAddress + 0xB9, tonumber(luaLoadingFunctionAddress) + 0x13F)
-	end
+    -- fetch the character info structure pointer
+    local characterInfoPointer = mll.ReadInteger(preservedStack + 0x33C)
+    mugen.log(string.format("Character info structure pointer discovered at 0x%08x.\n", tonumber(characterInfoPointer)))
 
-	-- lua-based additional payload: add a lua-executing state controller
-	local luaLoadingStateControllerAddress 
-	local luaRunningStateControllerAddress
-	if mll.GetMugenVersion() == 1 then 
-		luaLoadingStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/luasctrl.bin", 0x1000, 0x40)
-		luaRunningStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/luasctrlrun.bin", 0x1000, 0x40)
-	else
-		luaLoadingStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/luasctrl.bin", 0x1000, 0x40) 
-		luaRunningStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/luasctrlrun.bin", 0x1000, 0x40)
-	end
-	if luaLoadingStateControllerAddress == 0 then os.exit(-1) end
-	if luaRunningStateControllerAddress == 0 then os.exit(-1) end
-	mugen.log(string.format("Lua state controller loading function is loaded into memory at 0x%08x.\n", tonumber(luaLoadingStateControllerAddress)))
-	mugen.log(string.format("Lua state controller running function is loaded into memory at 0x%08x.\n\n", tonumber(luaRunningStateControllerAddress)))
+    -- allocate space for the character folder string
+    local characterFolderString = mll.VirtualAlloc(0x1000, 0x40)
+    mll.WriteString(characterFolderString, sourcefolder)
+    mll.WriteInteger(characterInfoPointer + 0xB0, tonumber(characterFolderString))
+    
+    if mll.GetMugenVersion() == 1 then 
+        luaLoadingFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/lualoader.bin", 0x2000, 0x40)
+    else
+        luaLoadingFunctionAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/lualoader.bin", 0x2000, 0x40) 
+    end
+    -- Check if mapped successfully
+    if luaLoadingFunctionAddress == 0 then os.exit(-1) end
+    
+    mugen.log(string.format("Lua loading function is loaded into memory at 0x%08x.\n\n", tonumber(luaLoadingFunctionAddress)))
 
-	-- write the call to our loaded lua-executing payload
-	local luaLoadString = 0
-	if mll.GetMugenVersion() == 1 then
-		jumpDistance = luaLoadingStateControllerAddress - 0x004480A5 - 5
-		mll.WriteByte(0x004480A5, 0xE9)
-		mll.WriteInteger(0x004480A6, jumpDistance)
-		mll.WriteByte(0x004480AA, 0x90)
+    -- write the call to our loaded lua-executing payload    
+    if (mll.GetMugenVersion() == 1)
+      then
+        JumpDistance = luaLoadingFunctionAddress + 12 - 0x0044B7AA - 5
+        mll.WriteByte(0x0044B7AA, 0xE8)
+        mll.WriteInteger(0x0044B7AB, JumpDistance)
+        mll.WriteByte(0x0044B7AF, 0x90)            
+    else
+        JumpDistance = luaLoadingFunctionAddress + 12 - 0x0044BCDA - 5
+        mll.WriteByte(0x0044BCDA, 0xE8)
+        mll.WriteInteger(0x0044BCDB, JumpDistance)
+        mll.WriteByte(0x0044BCDF, 0x90)        
+    end
+    
+    -- Get Pointer for each Data Type
+    AddressListPointer = mll.ReadInteger(luaLoadingFunctionAddress) + luaLoadingFunctionAddress
+    StringListPointer = mll.ReadInteger(luaLoadingFunctionAddress + 4) + luaLoadingFunctionAddress
+    
+    -- Get Addresses to Rewrite Strings
+    CharacterID_WriteLoc = mll.ReadInteger(AddressListPointer) + luaLoadingFunctionAddress
+    ErrorMessage_WriteLoc = mll.ReadInteger(AddressListPointer + 4) + luaLoadingFunctionAddress
+    
+    -- String Locations
+    CharacterID_StringLoc = mll.ReadInteger(StringListPointer) + luaLoadingFunctionAddress
+    ErrorMessage_StringLoc = mll.ReadInteger(StringListPointer + 4) + luaLoadingFunctionAddress
+    
+    -- CurrCharacterID (+1 for Push)
+    mll.WriteInteger(ErrorMessage_WriteLoc + 1, ErrorMessage_StringLoc)
+    -- Error message (+1 for Push)
+    mll.WriteInteger(CharacterID_WriteLoc + 1, CharacterID_StringLoc) 
+    
+    
+-- !!! Adjust for Pointers luaLoadingStateControllerAddress
 
-		jumpDistance = luaRunningStateControllerAddress - 0x0044BBAD - 5
-		mll.WriteByte(0x0044BBAD, 0xE9)
-		mll.WriteInteger(0x0044BBAE, jumpDistance)
-		
-		-- adjust for strings - loader
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x06, tonumber(luaLoadingStateControllerAddress) + 0x96) -- LuaExec
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x1D, tonumber(luaLoadingStateControllerAddress) + 0x9E) -- LuaFile
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x4C, tonumber(luaLoadingStateControllerAddress) + 0xCB) -- lua
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x66, tonumber(luaLoadingStateControllerAddress) + 0xA6) -- error string
+    -- lua-based additional payload: add a lua-executing state controller
+    luaLoadingStateControllerAddress = -1;
+    luaRunningStateControllerAddress = -1;
+    
+    if mll.GetMugenVersion() == 1 then 
+        luaLoadingStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/luasctrl.bin", 0x2000, 0x40)
+        luaRunningStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/luasctrlrun.bin", 0x2000, 0x40)
+    else
+        luaLoadingStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/luasctrl.bin", 0x2000, 0x40) 
+        luaRunningStateControllerAddress = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/luasctrlrun.bin", 0x2000, 0x40)
+    end
+    
+    if luaLoadingStateControllerAddress == 0 then os.exit(-1) end
+    if luaRunningStateControllerAddress == 0 then os.exit(-1) end
+    
+    
+    mugen.log(string.format("Lua state controller loading function is loaded into memory at 0x%08x.\n", tonumber(luaLoadingStateControllerAddress)))
+    mugen.log(string.format("Lua state controller running function is loaded into memory at 0x%08x.\n\n", tonumber(luaRunningStateControllerAddress)))
 
-		-- adjust for strings - runner
-		mll.WriteInteger(luaRunningStateControllerAddress + 0x17, tonumber(luaRunningStateControllerAddress) + 0x17D) -- CurrCharacterID
-		mll.WriteInteger(luaRunningStateControllerAddress + 0x13F, tonumber(luaRunningStateControllerAddress) + 0x154) -- Error message
-	else
-		jumpDistance = luaLoadingStateControllerAddress - 0x004485D5 - 5
-		mll.WriteByte(0x004485D5, 0xE9)
-		mll.WriteInteger(0x004485D6, jumpDistance)
-		mll.WriteByte(0x004485DA, 0x90)
 
-		jumpDistance = luaRunningStateControllerAddress - 0x0044C0DD - 5
-		mll.WriteByte(0x0044C0DD, 0xE9)
-		mll.WriteInteger(0x0044C0DE, jumpDistance)
+-- !!! Adjust for Pointers luaRunningStateControllerAddress
 
-		-- mugen in 1.1b1 doesn't appear to compile luaL_loadstring (or at least, I couldn't find it)
-		-- therefore I use ffi to obtain the function pointer
-		mugen.log("Performing 1.1b1 steps to obtain luaL_loadstring function pointer.\n")
+    
+    luaLoadString = 0
+    -- write the call to our loaded lua-executing payload    
+    if mll.GetMugenVersion() == 1 
+      then
+        JumpDistance = luaLoadingStateControllerAddress + 12 - 0x004480A5 - 5
+        mll.WriteByte(0x004480A5, 0xE9)
+        mll.WriteInteger(0x004480A6, JumpDistance)
+        mll.WriteByte(0x004480AA, 0x90)
+        
+        jumpDistance = luaRunningStateControllerAddress + 12 - 0x0044BBAD - 5
+        mll.WriteByte(0x0044BBAD, 0xE9)
+        mll.WriteInteger(0x0044BBAE, jumpDistance)
+      else
+        JumpDistance = luaLoadingStateControllerAddress + 12 - 0x004485D5 - 5
+        mll.WriteByte(0x004485D5, 0xE9)
+        mll.WriteInteger(0x004485D6, JumpDistance)
+        mll.WriteByte(0x004485DA, 0x90)
 
-		local luaModuleHandle = ffi.C.GetModuleHandleA("lua5.1.dll")
-		if luaModuleHandle == 0x00 then os.exit(-1) end
-		mugen.log(string.format("Lua module handle at address 0x%08x.\n", tonumber(luaModuleHandle)))
+        JumpDistance = luaRunningStateControllerAddress + 12 - 0x0044C0DD - 5
+        mll.WriteByte(0x0044C0DD, 0xE9)
+        mll.WriteInteger(0x0044C0DE, JumpDistance)
 
-		luaLoadString = ffi.C.GetProcAddress(luaModuleHandle, "luaL_loadstring")
-		if luaLoadString == 0x00 then os.exit(-1) end
-		mugen.log(string.format("luaL_loadstring function at address 0x%08x.\n", tonumber(luaLoadString)))
-		
-		-- adjust for strings
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x06, tonumber(luaLoadingStateControllerAddress) + 0x96) -- LuaExec
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x1D, tonumber(luaLoadingStateControllerAddress) + 0x9E) -- LuaFile
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x4C, tonumber(luaLoadingStateControllerAddress) + 0xCB) -- lua
-		mll.WriteInteger(luaLoadingStateControllerAddress + 0x66, tonumber(luaLoadingStateControllerAddress) + 0xA6) -- error string
+        -- mugen in 1.1b1 doesn't appear to compile luaL_loadstring (or at least, I couldn't find it)
+        -- therefore I use ffi to obtain the function pointer
+        mugen.log("Performing 1.1b1 steps to obtain luaL_loadstring function pointer.\n")
 
-		-- adjust for strings - runner
-		mll.WriteInteger(luaRunningStateControllerAddress + 0x17, tonumber(luaRunningStateControllerAddress) + 0x17D) -- CurrCharacterID
-		mll.WriteInteger(luaRunningStateControllerAddress + 0x13F, tonumber(luaRunningStateControllerAddress) + 0x154) -- Error message
+        luaModuleHandle = ffi.C.GetModuleHandleA("lua5.1.dll")
+        if luaModuleHandle == 0x00 then os.exit(-1) end
+        mugen.log(string.format("Lua module handle at address 0x%08x.\n", tonumber(luaModuleHandle)))
 
-		-- adjust for luaL_loadstring pointer
-		mll.WriteInteger(luaRunningStateControllerAddress + 0x5B, tonumber(luaLoadString)) 
-	end
+        luaLoadString = ffi.C.GetProcAddress(luaModuleHandle, "luaL_loadstring")
+        if luaLoadString == 0x00 then os.exit(-1) end
+        mugen.log(string.format("luaL_loadstring function at address 0x%08x.\n", tonumber(luaLoadString)))
 
-	-- install hooks
-	local luaHookPlayerStateOver
-	if mll.GetMugenVersion() == 1 then 
-		luaHookPlayerStateOver = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/hooks/playerstateover.bin", 0x1000, 0x40)
-	else
-		luaHookPlayerStateOver = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/hooks/playerstateover.bin", 0x1000, 0x40)
-	end
+        
+        JumpDistance = luaRunningStateControllerAddress + 12 - 0x0044BBAD - 5
+        mll.WriteByte(0x0044BBAD, 0xE9)
+        mll.WriteInteger(0x0044BBAE, JumpDistance)
+    end            
+        
+    -- Get Pointer for each Data Type
+    AddressListPointer = mll.ReadInteger(luaLoadingStateControllerAddress) + luaLoadingStateControllerAddress
+    StringListPointer = mll.ReadInteger(luaLoadingStateControllerAddress + 4) + luaLoadingStateControllerAddress
+    
+    -- Get Addresses to Rewrite Strings
+    LuaExec_WriteLoc = mll.ReadInteger(AddressListPointer) + luaLoadingStateControllerAddress
+    LuaFile_WriteLoc = mll.ReadInteger(AddressListPointer + 4) + luaLoadingStateControllerAddress
+    Lua_WriteLoc = mll.ReadInteger(AddressListPointer + 8) + luaLoadingStateControllerAddress
+    LuaError_WriteLoc = mll.ReadInteger(AddressListPointer + 12) + luaLoadingStateControllerAddress
+    
+    -- String Locations
+    LuaExec_StringLoc = mll.ReadInteger(StringListPointer    ) + luaLoadingStateControllerAddress
+    LuaFile_StringLoc = mll.ReadInteger(StringListPointer + 4) + luaLoadingStateControllerAddress
+    Lua_StringLoc =     mll.ReadInteger(StringListPointer + 8) + luaLoadingStateControllerAddress
+    LuaError_StringLoc= mll.ReadInteger(StringListPointer + 12) + luaLoadingStateControllerAddress
+    
+    -- +1 for Push    
+    mll.WriteInteger(LuaExec_WriteLoc + 1, LuaExec_StringLoc)
+    mll.WriteInteger(LuaFile_WriteLoc + 1, LuaFile_StringLoc)
+    mll.WriteInteger(Lua_WriteLoc + 1, Lua_StringLoc)
+    mll.WriteInteger(LuaError_WriteLoc + 1, LuaError_StringLoc)
+    
+    
+    
 
-	-- validate loaded
-	if luaHookPlayerStateOver == 0 then os.exit(-1) end
-	mugen.log(string.format("OnPlayerStateExecutionOver hook is loaded into memory at 0x%08x.\n", tonumber(luaHookPlayerStateOver)))
+   -- adjust for strings - runner
+                
+   -- Get Pointer for each Data Type
+   AddressListPointer = mll.ReadInteger(luaRunningStateControllerAddress) + luaRunningStateControllerAddress
+   StringListPointer = mll.ReadInteger(luaRunningStateControllerAddress + 4) + luaRunningStateControllerAddress
+    -- Get Addresses to Write Strings
+    CharacterID_WriteLoc = mll.ReadInteger(AddressListPointer) + luaRunningStateControllerAddress
+    ErrorMessage_WriteLoc = mll.ReadInteger(AddressListPointer + 4) + luaRunningStateControllerAddress
+        
+    -- Get String Addresses
+    CharacterID_StringLoc = mll.ReadInteger(StringListPointer) + luaRunningStateControllerAddress
+    ErrorMessage_StringLoc = mll.ReadInteger(StringListPointer + 4) + luaRunningStateControllerAddress
+        
+    -- CurrCharacterID (+1 for Push)
+    mll.WriteInteger(ErrorMessage_WriteLoc + 1, ErrorMessage_StringLoc)
+    -- Error message (+1 for Push)
+    mll.WriteInteger(CharacterID_WriteLoc + 1, CharacterID_StringLoc) 
+    
+    -- 11B1 only to implement LuaLoad string pointer.
+    if (mll.GetMugenVersion() == 2)
+    then
+      LuaLoad_WriteLoc = mll.ReadInteger(AddressListPointer + 8) + luaRunningStateControllerAddress      
+        mll.WriteInteger(LuaLoad_WriteLoc + 1, tonumber(luaLoadString))
+    end            
+    
 
-	-- install the hook
-	if mll.GetMugenVersion() == 1 then
-		-- patch instruction
-		jumpDistance = luaHookPlayerStateOver - 0x0045BD54 - 5
-		mll.WriteByte(0x0045BD54, 0xE9)
-		mll.WriteInteger(0x0045BD55, jumpDistance)
+    
 
-		-- adjust strings
-		mll.WriteInteger(luaHookPlayerStateOver + 0x16, tonumber(luaHookPlayerStateOver) + 0x116) -- charID
-		mll.WriteInteger(luaHookPlayerStateOver + 0x31, tonumber(luaHookPlayerStateOver) + 0x98) -- lua code
-		mll.WriteInteger(luaHookPlayerStateOver + 0x7E, tonumber(luaHookPlayerStateOver) + 0xE7) -- error string
-	else
-		-- patch instruction
-		jumpDistance = luaHookPlayerStateOver - 0x0045C2B4 - 5
-		mll.WriteByte(0x0045C2B4, 0xE9)
-		mll.WriteInteger(0x0045C2B5, jumpDistance)
+        
+    
 
-		-- adjust strings
-		mll.WriteInteger(luaHookPlayerStateOver + 0x16, tonumber(luaHookPlayerStateOver) + 0x116) -- charID
-		mll.WriteInteger(luaHookPlayerStateOver + 0x31, tonumber(luaHookPlayerStateOver) + 0x98) -- lua code
-		mll.WriteInteger(luaHookPlayerStateOver + 0x7E, tonumber(luaHookPlayerStateOver) + 0xE7) -- error string
 
-		-- adjust for luaL_loadstring pointer
-		mll.WriteInteger(luaHookPlayerStateOver + 0x3D, tonumber(luaLoadString)) 
-	end
 
-	-- zero out the string space so other characters are capable of loading
-	for i=0,64 do
-		mll.WriteInteger(0x67BD0210 + (i*4), 0x00)
-	end
 
-	mugen.log("Finished executing Lua payload, returning control to game.\n\n")
+
+-- Disabled hooks for now  (implement string pointers if reenable)
+--[[
+
+    -- install hooks
+    luaHookPlayerStateOver
+    if mll.GetMugenVersion() == 1 then 
+        luaHookPlayerStateOver = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11a4/hooks/playerstateover.bin", 0x2000, 0x40)
+    else
+        luaHookPlayerStateOver = mll.MemoryMapFile(sourcefolder .. EXPLOIT_FUNCTION_FOLDER .. "11b1/hooks/playerstateover.bin", 0x2000, 0x40)
+    end
+
+    -- validate loaded
+    if luaHookPlayerStateOver == 0 then os.exit(-1) end
+    mugen.log(string.format("OnPlayerStateExecutionOver hook is loaded into memory at 0x%08x.\n", tonumber(luaHookPlayerStateOver)))
+    
+
+
+    -- install the hook
+    if mll.GetMugenVersion() == 1 then
+        -- patch instruction
+        JumpDistance = luaHookPlayerStateOver - 0x0045BD54 - 5
+        mll.WriteByte(0x0045BD54, 0xE9)
+        mll.WriteInteger(0x0045BD55, JumpDistance)
+
+        -- adjust strings
+        mll.WriteInteger(luaHookPlayerStateOver + 0x16, tonumber(luaHookPlayerStateOver) + 0x116) -- charID
+        mll.WriteInteger(luaHookPlayerStateOver + 0x31, tonumber(luaHookPlayerStateOver) + 0x98) -- lua code
+        mll.WriteInteger(luaHookPlayerStateOver + 0x7E, tonumber(luaHookPlayerStateOver) + 0xE7) -- error string
+    else
+        -- patch instruction
+        JumpDistance = luaHookPlayerStateOver - 0x0045C2B4 - 5
+        mll.WriteByte(0x0045C2B4, 0xE9)
+        mll.WriteInteger(0x0045C2B5, JumpDistance)
+
+        -- adjust strings
+        mll.WriteInteger(luaHookPlayerStateOver + 0x16, tonumber(luaHookPlayerStateOver) + 0x116) -- charID
+        mll.WriteInteger(luaHookPlayerStateOver + 0x31, tonumber(luaHookPlayerStateOver) + 0x98) -- lua code
+        mll.WriteInteger(luaHookPlayerStateOver + 0x7E, tonumber(luaHookPlayerStateOver) + 0xE7) -- error string
+
+        -- adjust for luaL_loadstring pointer
+        mll.WriteInteger(luaHookPlayerStateOver + 0x3D, tonumber(luaLoadString)) 
+    end
+    
+--]]
+
+
+-- zero out the string space so other characters are capable of loading
+    for i=0,64 do
+      mll.WriteInteger(0x67BD0210 + (i*4), 0x00)
+    end
+
+    mugen.log("Finished executing Lua payload, returning control to game.\n\n")
 end
 
 -- hacky thing to gather the full stack trace on crash in a submodule
@@ -217,7 +291,7 @@ end
 local co = coroutine.create(bootstrap)
 local status, err = coroutine.resume(co)
 if not status then
-	mugen.log("Failed to run bootstrap script: " .. err .. "\n")
-	local full_tb = debug.traceback(co)
-	mugen.log(full_tb .. "\n")
+    mugen.log("Failed to run bootstrap script: " .. err .. "\n")
+    local full_tb = debug.traceback(co)
+    mugen.log(full_tb .. "\n")
 end
