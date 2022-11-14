@@ -143,7 +143,7 @@ luaLoadingFunctionAddress = -1;
         mll.WriteInteger(0x004480A6, JumpDistance)
         mll.WriteByte(0x004480AA, 0x90)
         
-        jumpDistance = luaRunningStateControllerAddress + 8 - 0x0044BBAD - 5
+        JumpDistance = luaRunningStateControllerAddress + 8 - 0x0044BBAD - 5
         mll.WriteByte(0x0044BBAD, 0xE9)
         mll.WriteInteger(0x0044BBAE, jumpDistance)
       else
