@@ -167,11 +167,6 @@ luaLoadingFunctionAddress = -1;
         luaLoadString = ffi.C.GetProcAddress(luaModuleHandle, "luaL_loadstring")
         if luaLoadString == 0x00 then os.exit(-1) end
         mugen.log(string.format("luaL_loadstring function at address 0x%08x.\n", tonumber(luaLoadString)))
-
-        -- +8 Label Data
-        JumpDistance = luaRunningStateControllerAddress + 8 - 0x0044BBAD - 5
-        mll.WriteByte(0x0044BBAD, 0xE9)
-        mll.WriteInteger(0x0044BBAE, JumpDistance)
     end            
         
     -- Get Pointer for each Data Type
